@@ -151,7 +151,9 @@ namespace MatrixRain
                 s.Glow = glow.Checked; s.Retro = retro.Checked; s.Intro = intro.Checked;
                 s.WakeClick = wClick.Checked; s.WakeSpace = wSpace.Checked;
                 s.Save();
+                Close();
             };
+            cancel.Click += (a, b) => Close();
             Controls.Add(ok); Controls.Add(cancel);
             AcceptButton = ok; CancelButton = cancel;
         }
