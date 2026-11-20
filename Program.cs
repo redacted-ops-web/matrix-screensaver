@@ -35,6 +35,7 @@ namespace MatrixRain
         public int Speed = 5;          // 1..10
         public int Size = 6;           // 1..10 (bigger = larger characters)
         public int Density = 8;        // 1..10 (more simultaneous streams per column)
+        public int Brightness = 8;     // 1..10 (10 = full, 8 = 80%)
         public bool Glow = true;
         public bool Retro = true;      // scanlines + slight pixelation
         public bool Intro = true;      // desktop-to-rain start
@@ -54,6 +55,7 @@ namespace MatrixRain
                     s.Speed = Clamp((int)k.GetValue("Speed", s.Speed), 1, 10);
                     s.Size = Clamp((int)k.GetValue("Size", s.Size), 1, 10);
                     s.Density = Clamp((int)k.GetValue("Density", s.Density), 1, 10);
+                    s.Brightness = Clamp((int)k.GetValue("Brightness", s.Brightness), 1, 10);
                     s.Glow = (int)k.GetValue("Glow", 1) != 0;
                     s.Retro = (int)k.GetValue("Retro", 1) != 0;
                     s.Intro = (int)k.GetValue("Intro", 1) != 0;
@@ -74,6 +76,7 @@ namespace MatrixRain
                     k.SetValue("Speed", Speed);
                     k.SetValue("Size", Size);
                     k.SetValue("Density", Density);
+                    k.SetValue("Brightness", Brightness);
                     k.SetValue("Glow", Glow ? 1 : 0);
                     k.SetValue("Retro", Retro ? 1 : 0);
                     k.SetValue("Intro", Intro ? 1 : 0);
@@ -91,6 +94,7 @@ namespace MatrixRain
     {
         readonly Settings s = Settings.Load();
         readonly TrackBar speed = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
+        readonly TrackBar bright = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
         readonly TrackBar size = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
         readonly TrackBar density = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
         readonly CheckBox glow = new CheckBox { Text = "Glow around characters", AutoSize = true };
@@ -105,7 +109,7 @@ namespace MatrixRain
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(330, 600);
+            ClientSize = new Size(330, 660);
 
             int y = 12;
             Controls.Add(new Label { Text = "Rain speed (slow to fast)", AutoSize = true, Left = 16, Top = y }); y += 20;
@@ -114,6 +118,8 @@ namespace MatrixRain
             density.Left = 10; density.Top = y; density.Value = s.Density; Controls.Add(density); y += 50;
             Controls.Add(new Label { Text = "Character size (small to large)", AutoSize = true, Left = 16, Top = y }); y += 20;
             size.Left = 10; size.Top = y; size.Value = s.Size; Controls.Add(size); y += 54;
+            Controls.Add(new Label { Text = "Brightness (dim to full)", AutoSize = true, Left = 16, Top = y }); y += 20;
+            bright.Left = 10; bright.Top = y; bright.Value = s.Brightness; Controls.Add(bright); y += 54;
 
             glow.Left = 16; glow.Top = y; glow.Checked = s.Glow; Controls.Add(glow); y += 26;
             retro.Left = 16; retro.Top = y; retro.Checked = s.Retro; Controls.Add(retro); y += 26;
@@ -137,11 +143,11 @@ namespace MatrixRain
                 ForeColor = found ? Color.DarkGreen : Color.Firebrick
             });
 
-            var ok = new Button { Text = "OK", Left = 150, Top = 560, Width = 80, DialogResult = DialogResult.OK };
-            var cancel = new Button { Text = "Cancel", Left = 240, Top = 560, Width = 80, DialogResult = DialogResult.Cancel };
+            var ok = new Button { Text = "OK", Left = 150, Top = 620, Width = 80, DialogResult = DialogResult.OK };
+            var cancel = new Button { Text = "Cancel", Left = 240, Top = 620, Width = 80, DialogResult = DialogResult.Cancel };
             ok.Click += (a, b) =>
             {
-                s.Speed = speed.Value; s.Size = size.Value; s.Density = density.Value;
+                s.Speed = speed.Value; s.Size = size.Value; s.Density = density.Value; s.Brightness = bright.Value;
                 s.Glow = glow.Checked; s.Retro = retro.Checked; s.Intro = intro.Checked;
                 s.WakeClick = wClick.Checked; s.WakeSpace = wSpace.Checked;
                 s.Save();
@@ -322,8 +328,8 @@ namespace MatrixRain
                 for (int lv = 0; lv <= Levels; lv++)
                 {
                     atlas[lv] = new Bitmap[glyphs.Length];
-                    Color c = LevelColor(lv);
-                    Color halo = lv == HeadLevel ? Color.FromArgb(90, 255, 150) : c;
+                    Color c = Dim(LevelColor(lv));
+                    Color halo = lv == HeadLevel ? Dim(Color.FromArgb(90, 255, 150)) : c;
                     for (int gi = 0; gi < glyphs.Length; gi++)
                     {
                         var small = new Bitmap(sw, sh, PixelFormat.Format32bppPArgb);
@@ -374,6 +380,12 @@ namespace MatrixRain
                     }
                 }
             }
+        }
+
+        Color Dim(Color x)
+        {
+            float f = cfg.Brightness / 10f;
+            return Color.FromArgb(x.A, (int)(x.R * f), (int)(x.G * f), (int)(x.B * f));
         }
 
         static bool FontFamilyExists(string name)
