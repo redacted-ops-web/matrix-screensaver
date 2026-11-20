@@ -309,7 +309,11 @@ namespace MatrixRain
         bool[] active;
         int[] respawnWait;
         Bitmap frame;
-        Bitmap desk;
+        static readonly Color Key = Color.FromArgb(255, 0, 255); // shows the live desktop through the window
+        bool outro;
+        float[] outHead;
+        float[] outSpeed;
+        int outLeft;
         bool[] introDone;
         int introLeft;
         float speedMul;
@@ -318,18 +322,13 @@ namespace MatrixRain
         {
             cfg = settings;
             bounds = SystemInformation.VirtualScreen; // every monitor as one canvas
-            if (cfg.Intro)
-            {
-                desk = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppPArgb);
-                using (var dg = Graphics.FromImage(desk))
-                    dg.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
-            }
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
             Bounds = bounds;
             TopMost = true;
             ShowInTaskbar = false;
             BackColor = Color.Black;
+            if (cfg.Intro) TransparencyKey = Key;   // live desktop until the rain covers it
             DoubleBuffered = true;
             KeyPreview = true;
             Cursor.Hide();
@@ -342,16 +341,33 @@ namespace MatrixRain
             frame = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppPArgb);
             using (var g = Graphics.FromImage(frame))
             {
-                if (desk != null) g.DrawImageUnscaled(desk, 0, 0); else g.Clear(Color.Black);
+                g.Clear(cfg.Intro ? Key : Color.Black);
             }
 
             timer.Interval = 33; // ~30 fps
             timer.Tick += (s, e) => Step();
             timer.Start();
 
-            KeyDown += (s, e) => { if (cfg.WakeSpace && e.KeyCode == Keys.Space) Close(); };
-            MouseDown += (s, e) => { if (cfg.WakeClick && e.Button == MouseButtons.Left) Close(); };
+            KeyDown += (s, e) => { if (cfg.WakeSpace && e.KeyCode == Keys.Space) Wake(); };
+            MouseDown += (s, e) => { if (cfg.WakeClick && e.Button == MouseButtons.Left) Wake(); };
             Shown += (s, e) => { Activate(); Focus(); };   // so the space bar reaches this window
+        }
+
+        // Wake: play the intro in reverse (black columns fall away and the desktop comes back), then close.
+        void Wake()
+        {
+            if (outro) return;
+            if (!cfg.Intro || introLeft > 0) { Close(); return; }
+            outro = true;
+            TransparencyKey = Key;
+            outHead = new float[cols];
+            outSpeed = new float[cols];
+            outLeft = cols;
+            for (int c = 0; c < cols; c++)
+            {
+                outSpeed[c] = NewSpeed() * 1.6f;
+                outHead[c] = -outSpeed[c] * rng.Next(0, 60) - 1;
+            }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -551,13 +567,13 @@ namespace MatrixRain
                 {
                     int d = c * lanes + l;
                     speed[d] = NewSpeed();
-                    if (l == 0 && desk != null)
+                    if (l == 0 && cfg.Intro)
                     {
                         // stream 0 does the desktop-to-rain reveal; each column starts at its own moment (up to ~3 s)
                         headY[d] = -speed[d] * rng.Next(0, 90) - 1;
                         active[d] = true;
                     }
-                    else if (desk != null)
+                    else if (cfg.Intro)
                     {
                         headY[d] = -1;
                         active[d] = false;
@@ -569,7 +585,7 @@ namespace MatrixRain
                         active[d] = true;
                     }
                 }
-                if (desk == null) { introDone[c] = true; introLeft--; }
+                if (!cfg.Intro) { introDone[c] = true; introLeft--; }
             }
         }
 
@@ -580,11 +596,11 @@ namespace MatrixRain
         void Step()
         {
             // wake check that does not depend on window focus
-            if ((cfg.WakeSpace && (GetAsyncKeyState(0x20) & 0x8000) != 0) ||
-                (cfg.WakeClick && (GetAsyncKeyState(0x01) & 0x8000) != 0))
+            if (!outro && (cfg.WakeSpace && (GetAsyncKeyState(0x20) & 0x8000) != 0) ||
+                (!outro && cfg.WakeClick && (GetAsyncKeyState(0x01) & 0x8000) != 0))
             {
-                Close();
-                return;
+                Wake();
+                if (IsDisposed) return;
             }
             // fade
             for (int c = 0; c < cols; c++)
@@ -635,6 +651,26 @@ namespace MatrixRain
                     }
                 }
             }
+            if (outro)
+            {
+                int left = 0;
+                for (int c = 0; c < cols; c++)
+                {
+                    outHead[c] += outSpeed[c];
+                    int oe = (int)Math.Floor(outHead[c]) + 1;
+                    if (oe < rows)
+                    {
+                        left++;
+                        if (oe >= 0)
+                        {
+                            int i = oe * cols + c;
+                            bright[i] = 1.5f;
+                            glyphGrid[i] = RandGlyph();
+                        }
+                    }
+                }
+                outLeft = left;
+            }
             // flicker inside trails
             int flickers = cols * rows / 300;
             for (int q = 0; q < flickers; q++)
@@ -644,10 +680,12 @@ namespace MatrixRain
             }
             Draw();
             Invalidate();
+            if (outro && outLeft <= 0) Close();
         }
 
         void Draw()
         {
+            using (var keyBrush = new SolidBrush(Key))
             using (var g = Graphics.FromImage(frame))
             {
                 g.CompositingMode = CompositingMode.SourceCopy;
@@ -665,15 +703,15 @@ namespace MatrixRain
                             introDone[c] = true;
                             introLeft--;
                         }
-                        else if (desk != null)
+                        else
                         {
                             int y0 = edge * cellH;
-                            var src = new Rectangle(x, y0, Math.Min(cellW, bounds.Width - x), bounds.Height - y0);
-                            if (src.Width > 0 && src.Height > 0)
-                                g.DrawImage(desk, new Rectangle(x, y0, src.Width, src.Height), src, GraphicsUnit.Pixel);
+                            g.FillRectangle(keyBrush, x, y0, cellW, bounds.Height - y0);
                         }
                     }
-                    for (int r = 0; r < edge; r++)
+                    int oEdge = outro ? Math.Max(0, Math.Min(rows, (int)Math.Floor(outHead[c]) + 1)) : 0;
+                    if (oEdge > 0) g.FillRectangle(keyBrush, x, 0, cellW, oEdge * cellH);
+                    for (int r = oEdge; r < edge; r++)
                     {
                         int i = r * cols + c;
                         float b = bright[i];
@@ -686,7 +724,7 @@ namespace MatrixRain
                     }
                 }
             }
-            if (introLeft <= 0 && desk != null) { desk.Dispose(); desk = null; }
+            if (introLeft <= 0 && !outro && !TransparencyKey.IsEmpty) TransparencyKey = Color.Empty; // fully opaque once covered
             for (int i = 0; i < bright.Length; i++) if (bright[i] > 1f) bright[i] = 0.999f;
         }
 
