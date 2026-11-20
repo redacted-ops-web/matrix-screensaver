@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -21,7 +22,16 @@ namespace MatrixRain
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            if (mode == "/s" || mode == "/t")
+            if (mode == "/w")
+            {
+                bool created;
+                using (var m = new System.Threading.Mutex(true, "MatrixRainWatcher", out created))
+                {
+                    if (!created) return;
+                    Application.Run(new Watcher());
+                }
+            }
+            else if (mode == "/s" || mode == "/t")
                 Application.Run(new RainForm(Settings.Load()));
             else if (mode == "/p")
                 return; // tiny preview pane in the Windows dialog: nothing to draw
@@ -36,6 +46,7 @@ namespace MatrixRain
         public int Size = 6;           // 1..10 (bigger = larger characters)
         public int Density = 8;        // 1..10 (more simultaneous streams per column)
         public int Brightness = 8;     // 1..10 (10 = full, 8 = 80%)
+        public int IdleMinutes = 10;   // watcher mode: start after this many idle minutes
         public bool Glow = true;
         public bool Retro = true;      // scanlines + slight pixelation
         public bool Intro = true;      // desktop-to-rain start
@@ -56,6 +67,7 @@ namespace MatrixRain
                     s.Size = Clamp((int)k.GetValue("Size", s.Size), 1, 10);
                     s.Density = Clamp((int)k.GetValue("Density", s.Density), 1, 10);
                     s.Brightness = Clamp((int)k.GetValue("Brightness", s.Brightness), 1, 10);
+                    s.IdleMinutes = Clamp((int)k.GetValue("IdleMinutes", s.IdleMinutes), 1, 120);
                     s.Glow = (int)k.GetValue("Glow", 1) != 0;
                     s.Retro = (int)k.GetValue("Retro", 1) != 0;
                     s.Intro = (int)k.GetValue("Intro", 1) != 0;
@@ -77,6 +89,7 @@ namespace MatrixRain
                     k.SetValue("Size", Size);
                     k.SetValue("Density", Density);
                     k.SetValue("Brightness", Brightness);
+                    k.SetValue("IdleMinutes", IdleMinutes);
                     k.SetValue("Glow", Glow ? 1 : 0);
                     k.SetValue("Retro", Retro ? 1 : 0);
                     k.SetValue("Intro", Intro ? 1 : 0);
@@ -97,6 +110,7 @@ namespace MatrixRain
         readonly TrackBar bright = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
         readonly TrackBar size = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
         readonly TrackBar density = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
+        readonly NumericUpDown idle = new NumericUpDown { Minimum = 1, Maximum = 120, Width = 60 };
         readonly CheckBox glow = new CheckBox { Text = "Glow around characters", AutoSize = true };
         readonly CheckBox retro = new CheckBox { Text = "Old monitor look (scanlines + pixelation)", AutoSize = true };
         readonly CheckBox intro = new CheckBox { Text = "Start with the desktop turning into rain", AutoSize = true };
@@ -109,7 +123,7 @@ namespace MatrixRain
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(330, 660);
+            ClientSize = new Size(330, 720);
 
             int y = 12;
             Controls.Add(new Label { Text = "Rain speed (slow to fast)", AutoSize = true, Left = 16, Top = y }); y += 20;
@@ -123,7 +137,9 @@ namespace MatrixRain
 
             glow.Left = 16; glow.Top = y; glow.Checked = s.Glow; Controls.Add(glow); y += 26;
             retro.Left = 16; retro.Top = y; retro.Checked = s.Retro; Controls.Add(retro); y += 26;
-            intro.Left = 16; intro.Top = y; intro.Checked = s.Intro; Controls.Add(intro); y += 36;
+            intro.Left = 16; intro.Top = y; intro.Checked = s.Intro; Controls.Add(intro); y += 34;
+            Controls.Add(new Label { Text = "Start after this many idle minutes (background mode):", AutoSize = true, Left = 16, Top = y }); y += 22;
+            idle.Left = 16; idle.Top = y; idle.Value = s.IdleMinutes; Controls.Add(idle); y += 36;
 
             Controls.Add(new Label { Text = "Wake the screen (exit the screensaver) on:", AutoSize = true, Left = 16, Top = y }); y += 24;
             wClick.Left = 30; wClick.Top = y; wClick.Checked = s.WakeClick; Controls.Add(wClick); y += 26;
@@ -143,11 +159,11 @@ namespace MatrixRain
                 ForeColor = found ? Color.DarkGreen : Color.Firebrick
             });
 
-            var ok = new Button { Text = "OK", Left = 150, Top = 620, Width = 80 };
-            var cancel = new Button { Text = "Cancel", Left = 240, Top = 620, Width = 80 };
+            var ok = new Button { Text = "OK", Left = 150, Top = 680, Width = 80 };
+            var cancel = new Button { Text = "Cancel", Left = 240, Top = 680, Width = 80 };
             ok.Click += (a, b) =>
             {
-                s.Speed = speed.Value; s.Size = size.Value; s.Density = density.Value; s.Brightness = bright.Value;
+                s.Speed = speed.Value; s.Size = size.Value; s.Density = density.Value; s.Brightness = bright.Value; s.IdleMinutes = (int)idle.Value;
                 s.Glow = glow.Checked; s.Retro = retro.Checked; s.Intro = intro.Checked;
                 s.WakeClick = wClick.Checked; s.WakeSpace = wSpace.Checked;
                 s.Save();
@@ -156,6 +172,42 @@ namespace MatrixRain
             cancel.Click += (a, b) => Environment.Exit(0);
             Controls.Add(ok); Controls.Add(cancel);
             AcceptButton = ok; CancelButton = cancel;
+        }
+    }
+
+    sealed class Watcher : ApplicationContext
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+        [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LASTINPUTINFO p);
+        [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
+
+        readonly Timer timer = new Timer();
+        bool showing;
+
+        public Watcher()
+        {
+            timer.Interval = 2000;
+            timer.Tick += (s, e) => Check();
+            timer.Start();
+        }
+
+        void Check()
+        {
+            if (showing) return;
+            var li = new LASTINPUTINFO();
+            li.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
+            if (!GetLastInputInfo(ref li)) return;
+            uint idle = unchecked((uint)Environment.TickCount - li.dwTime);
+            var cfg = Settings.Load();
+            if (idle < (uint)cfg.IdleMinutes * 60000u) return;
+            // do not start over a full-screen game, video or presentation
+            int state;
+            if (SHQueryUserNotificationState(out state) != 0 || state != 5) return;
+            showing = true;
+            var f = new RainForm(cfg);
+            f.FormClosed += (s, e) => { showing = false; };
+            f.Show();
         }
     }
 
@@ -457,8 +509,17 @@ namespace MatrixRain
 
         float NewSpeed() { return (0.30f + (float)rng.NextDouble() * 0.60f) * speedMul; }
 
+        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+
         void Step()
         {
+            // wake check that does not depend on window focus
+            if ((cfg.WakeSpace && (GetAsyncKeyState(0x20) & 0x8000) != 0) ||
+                (cfg.WakeClick && (GetAsyncKeyState(0x01) & 0x8000) != 0))
+            {
+                Close();
+                return;
+            }
             // fade
             for (int c = 0; c < cols; c++)
             {
