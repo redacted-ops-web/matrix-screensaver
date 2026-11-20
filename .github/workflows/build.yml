@@ -1,0 +1,35 @@
+name: build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: dotnet build MatrixRain.csproj -c Release -o out
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force files | Out-Null
+          Copy-Item out/MatrixRain.exe files/MatrixRain.scr
+          (Get-FileHash files/MatrixRain.scr -Algorithm SHA256).Hash | Out-File files/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MatrixRain
+          path: files/*
+      - name: Publish to branch
+        shell: pwsh
+        run: |
+          git config user.name "build"
+          git config user.email "build@users.noreply.github.com"
+          git checkout --orphan scr-latest
+          git rm -rf --quiet . 2>$null
+          Copy-Item files/* .
+          git add MatrixRain.scr SHA256.txt
+          git commit -m "MatrixRain.scr build"
+          git push -f origin scr-latest
