@@ -143,17 +143,17 @@ namespace MatrixRain
                 ForeColor = found ? Color.DarkGreen : Color.Firebrick
             });
 
-            var ok = new Button { Text = "OK", Left = 150, Top = 620, Width = 80, DialogResult = DialogResult.OK };
-            var cancel = new Button { Text = "Cancel", Left = 240, Top = 620, Width = 80, DialogResult = DialogResult.Cancel };
+            var ok = new Button { Text = "OK", Left = 150, Top = 620, Width = 80 };
+            var cancel = new Button { Text = "Cancel", Left = 240, Top = 620, Width = 80 };
             ok.Click += (a, b) =>
             {
                 s.Speed = speed.Value; s.Size = size.Value; s.Density = density.Value; s.Brightness = bright.Value;
                 s.Glow = glow.Checked; s.Retro = retro.Checked; s.Intro = intro.Checked;
                 s.WakeClick = wClick.Checked; s.WakeSpace = wSpace.Checked;
                 s.Save();
-                Close();
+                Environment.Exit(0);
             };
-            cancel.Click += (a, b) => Close();
+            cancel.Click += (a, b) => Environment.Exit(0);
             Controls.Add(ok); Controls.Add(cancel);
             AcceptButton = ok; CancelButton = cancel;
         }
