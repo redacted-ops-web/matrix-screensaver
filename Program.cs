@@ -21,10 +21,8 @@ namespace MatrixRain
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            if (mode == "/s")
-                Application.Run(new RainForm(Settings.Load(), false));
-            else if (mode == "/t")
-                Application.Run(new RainForm(Settings.Load(), true)); // test run, same as /s
+            if (mode == "/s" || mode == "/t")
+                Application.Run(new RainForm(Settings.Load()));
             else if (mode == "/p")
                 return; // tiny preview pane in the Windows dialog: nothing to draw
             else
@@ -36,10 +34,12 @@ namespace MatrixRain
     {
         public int Speed = 5;          // 1..10
         public int Size = 6;           // 1..10 (bigger = larger characters)
+        public int Density = 8;        // 1..10 (more simultaneous streams per column)
         public bool Glow = true;
+        public bool Retro = true;      // scanlines + slight pixelation
         public bool Intro = true;      // desktop-to-rain start
-        public bool WakeClick = true;   // left mouse button
-        public bool WakeSpace = true;   // space bar
+        public bool WakeClick = true;  // left mouse button
+        public bool WakeSpace = true;  // space bar
 
         const string KeyPath = @"Software\MatrixRain";
 
@@ -53,7 +53,9 @@ namespace MatrixRain
                     if (k == null) return s;
                     s.Speed = Clamp((int)k.GetValue("Speed", s.Speed), 1, 10);
                     s.Size = Clamp((int)k.GetValue("Size", s.Size), 1, 10);
+                    s.Density = Clamp((int)k.GetValue("Density", s.Density), 1, 10);
                     s.Glow = (int)k.GetValue("Glow", 1) != 0;
+                    s.Retro = (int)k.GetValue("Retro", 1) != 0;
                     s.Intro = (int)k.GetValue("Intro", 1) != 0;
                     s.WakeClick = (int)k.GetValue("WakeClick", 1) != 0;
                     s.WakeSpace = (int)k.GetValue("WakeSpace", 1) != 0;
@@ -71,7 +73,9 @@ namespace MatrixRain
                 {
                     k.SetValue("Speed", Speed);
                     k.SetValue("Size", Size);
+                    k.SetValue("Density", Density);
                     k.SetValue("Glow", Glow ? 1 : 0);
+                    k.SetValue("Retro", Retro ? 1 : 0);
                     k.SetValue("Intro", Intro ? 1 : 0);
                     k.SetValue("WakeClick", WakeClick ? 1 : 0);
                     k.SetValue("WakeSpace", WakeSpace ? 1 : 0);
@@ -88,7 +92,9 @@ namespace MatrixRain
         readonly Settings s = Settings.Load();
         readonly TrackBar speed = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
         readonly TrackBar size = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
+        readonly TrackBar density = new TrackBar { Minimum = 1, Maximum = 10, TickFrequency = 1, Width = 260 };
         readonly CheckBox glow = new CheckBox { Text = "Glow around characters", AutoSize = true };
+        readonly CheckBox retro = new CheckBox { Text = "Old monitor look (scanlines + pixelation)", AutoSize = true };
         readonly CheckBox intro = new CheckBox { Text = "Start with the desktop turning into rain", AutoSize = true };
         readonly CheckBox wClick = new CheckBox { Text = "Left mouse click", AutoSize = true };
         readonly CheckBox wSpace = new CheckBox { Text = "Space bar", AutoSize = true };
@@ -99,16 +105,19 @@ namespace MatrixRain
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(330, 420);
+            ClientSize = new Size(330, 600);
 
             int y = 12;
             Controls.Add(new Label { Text = "Rain speed (slow to fast)", AutoSize = true, Left = 16, Top = y }); y += 20;
-            speed.Left = 10; speed.Top = y; speed.Value = s.Speed; Controls.Add(speed); y += 52;
+            speed.Left = 10; speed.Top = y; speed.Value = s.Speed; Controls.Add(speed); y += 50;
+            Controls.Add(new Label { Text = "Rain density (light to heavy)", AutoSize = true, Left = 16, Top = y }); y += 20;
+            density.Left = 10; density.Top = y; density.Value = s.Density; Controls.Add(density); y += 50;
             Controls.Add(new Label { Text = "Character size (small to large)", AutoSize = true, Left = 16, Top = y }); y += 20;
-            size.Left = 10; size.Top = y; size.Value = s.Size; Controls.Add(size); y += 56;
+            size.Left = 10; size.Top = y; size.Value = s.Size; Controls.Add(size); y += 54;
 
-            glow.Left = 16; glow.Top = y; glow.Checked = s.Glow; Controls.Add(glow); y += 28;
-            intro.Left = 16; intro.Top = y; intro.Checked = s.Intro; Controls.Add(intro); y += 38;
+            glow.Left = 16; glow.Top = y; glow.Checked = s.Glow; Controls.Add(glow); y += 26;
+            retro.Left = 16; retro.Top = y; retro.Checked = s.Retro; Controls.Add(retro); y += 26;
+            intro.Left = 16; intro.Top = y; intro.Checked = s.Intro; Controls.Add(intro); y += 36;
 
             Controls.Add(new Label { Text = "Wake the screen (exit the screensaver) on:", AutoSize = true, Left = 16, Top = y }); y += 24;
             wClick.Left = 30; wClick.Top = y; wClick.Checked = s.WakeClick; Controls.Add(wClick); y += 26;
@@ -116,14 +125,24 @@ namespace MatrixRain
             Controls.Add(new Label
             {
                 Text = "Mouse movement and other keys never wake it. If both boxes are unticked, Alt+F4 still closes it. How long Windows waits before starting it, and whether it asks for a password afterwards, are set in Windows' own Screen Saver Settings.",
-                Left = 16, Top = y, Width = 300, Height = 52
+                Left = 16, Top = y, Width = 300, Height = 64
+            }); y += 70;
+
+            bool found = RainForm.FindMatrixFont() != null;
+            Controls.Add(new Label
+            {
+                Text = found ? "Font: Matrix Code NFI found - using the movie glyphs."
+                             : "Font: Matrix Code NFI NOT found - using a plain katakana fallback.",
+                Left = 16, Top = y, Width = 300, Height = 34,
+                ForeColor = found ? Color.DarkGreen : Color.Firebrick
             });
 
-            var ok = new Button { Text = "OK", Left = 150, Top = 380, Width = 80, DialogResult = DialogResult.OK };
-            var cancel = new Button { Text = "Cancel", Left = 240, Top = 380, Width = 80, DialogResult = DialogResult.Cancel };
+            var ok = new Button { Text = "OK", Left = 150, Top = 560, Width = 80, DialogResult = DialogResult.OK };
+            var cancel = new Button { Text = "Cancel", Left = 240, Top = 560, Width = 80, DialogResult = DialogResult.Cancel };
             ok.Click += (a, b) =>
             {
-                s.Speed = speed.Value; s.Size = size.Value; s.Glow = glow.Checked; s.Intro = intro.Checked;
+                s.Speed = speed.Value; s.Size = size.Value; s.Density = density.Value;
+                s.Glow = glow.Checked; s.Retro = retro.Checked; s.Intro = intro.Checked;
                 s.WakeClick = wClick.Checked; s.WakeSpace = wSpace.Checked;
                 s.Save();
             };
@@ -134,12 +153,11 @@ namespace MatrixRain
 
     sealed class RainForm : Form
     {
-        // Glyph set, following the film's code: mirrored half-width katakana, numerals,
-        // capital Latin letters and a handful of symbols.
+        // Fallback glyph set (used only when the Matrix Code NFI font is not available).
         const string Kana = "ｦｱｳｴｵｶｷｹｺｻｼｽｾｿﾀﾂﾃﾅﾆﾇﾈﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾗﾘﾜ";
         const string Digits = "0123456789";
         const string Letters = "BCDEHIJLMPSTUWYZ";
-        const string Symbols = ":.\"=*+-<>¦^_日";
+        const string Symbols = ":.\"=*+-<>^_";
 
         const int Levels = 24;        // brightness steps in the trail
         const int HeadLevel = Levels; // extra "white head" level
@@ -149,17 +167,19 @@ namespace MatrixRain
         readonly Random rng = new Random();
         readonly Timer timer = new Timer();
 
-        int cellW, cellH, cols, rows;
-        FontFamily matrixFamily;     // Matrix Code NFI, if found on this PC
-        PrivateFontCollection privateFonts;
+        static PrivateFontCollection privateFonts;
+        FontFamily matrixFamily;
+
+        int cellW, cellH, cols, rows, lanes;
         string glyphs;
         int[] pick;                // weighted table of glyph indexes
         Bitmap[][] atlas;          // [level][glyph]
         int[] glyphGrid;
         float[] bright;
-        float[] headY;
+        float[] colDecay;          // brightness lost per frame in each column
+        int[] colTrail;            // trail length (rows) per column
+        float[] headY;             // per stream (cols * lanes)
         float[] speed;
-        int[] trailLen;
         bool[] active;
         int[] respawnWait;
         Bitmap frame;
@@ -168,7 +188,7 @@ namespace MatrixRain
         int introLeft;
         float speedMul;
 
-        public RainForm(Settings settings, bool testMode)
+        public RainForm(Settings settings)
         {
             cfg = settings;
             bounds = SystemInformation.VirtualScreen; // every monitor as one canvas
@@ -189,6 +209,7 @@ namespace MatrixRain
             Cursor.Hide();
 
             speedMul = 0.4f + cfg.Speed * 0.12f;
+            lanes = 1 + cfg.Density / 4;           // 1..3 streams per column
             BuildAtlas();
             InitGrid();
 
@@ -216,9 +237,9 @@ namespace MatrixRain
 
         int RandGlyph() { return pick[rng.Next(pick.Length)]; }
 
-        bool IsMirrored(char ch) { return matrixFamily == null && ((ch >= '\uFF66' && ch <= '\uFF9D') || ch == '\u65E5'); }
+        bool IsMirrored(char ch) { return matrixFamily == null && ((ch >= 'ｦ' && ch <= 'ﾝ')); }
 
-        FontFamily FindMatrixFont()
+        internal static FontFamily FindMatrixFont()
         {
             try
             {
@@ -254,7 +275,7 @@ namespace MatrixRain
             int minH = int.MaxValue;
             foreach (var s in Screen.AllScreens) minH = Math.Min(minH, s.Bounds.Height);
             int targetRows = 66 - cfg.Size * 4;                 // Size 6 -> 42 rows
-            cellH = Math.Max(14, (int)Math.Round(minH / (double)targetRows));
+            cellH = Math.Max(15, (int)Math.Round(minH / (double)targetRows / 3.0) * 3); // multiple of 3 for scanlines
             cellW = Math.Max(9, (int)Math.Round(cellH * 0.68));
             matrixFamily = FindMatrixFont();
 
@@ -277,7 +298,6 @@ namespace MatrixRain
             }
             pick = table.ToArray();
 
-            atlas = new Bitmap[Levels + 1][];
             FontFamily fam;
             FontStyle style;
             if (matrixFamily != null) { fam = matrixFamily; style = FontStyle.Regular; }
@@ -288,9 +308,16 @@ namespace MatrixRain
                 fam = new FontFamily(fontName);
                 style = fam.IsStyleAvailable(FontStyle.Bold) ? FontStyle.Bold : FontStyle.Regular;
             }
-            float em = cellH * 0.80f;
 
+            // With the old-monitor look, glyphs are drawn at ~70% size and scaled up with hard pixel edges.
+            float k = cfg.Retro ? 0.70f : 1f;
+            int sw = Math.Max(6, (int)Math.Round(cellW * k));
+            int sh = Math.Max(9, (int)Math.Round(cellH * k));
+            float em = sh * 0.80f;
+
+            atlas = new Bitmap[Levels + 1][];
             using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
+            using (var darken = new SolidBrush(Color.FromArgb(105, 0, 0, 0)))
             {
                 for (int lv = 0; lv <= Levels; lv++)
                 {
@@ -299,8 +326,8 @@ namespace MatrixRain
                     Color halo = lv == HeadLevel ? Color.FromArgb(90, 255, 150) : c;
                     for (int gi = 0; gi < glyphs.Length; gi++)
                     {
-                        var bmp = new Bitmap(cellW, cellH, PixelFormat.Format32bppPArgb);
-                        using (var g = Graphics.FromImage(bmp))
+                        var small = new Bitmap(sw, sh, PixelFormat.Format32bppPArgb);
+                        using (var g = Graphics.FromImage(small))
                         using (var path = new GraphicsPath())
                         using (var fill = new SolidBrush(c))
                         {
@@ -308,26 +335,42 @@ namespace MatrixRain
                             g.SmoothingMode = SmoothingMode.AntiAlias;
                             if (IsMirrored(glyphs[gi]))
                             {
-                                g.TranslateTransform(cellW, 0);
+                                g.TranslateTransform(sw, 0);
                                 g.ScaleTransform(-1, 1);
                             }
                             path.AddString(glyphs[gi].ToString(), fam, (int)style, em,
-                                           new RectangleF(0, 0, cellW, cellH), sf);
+                                           new RectangleF(0, 0, sw, sh), sf);
                             if (cfg.Glow)
                             {
-                                using (var p1 = new Pen(Color.FromArgb(lv == HeadLevel ? 55 : 38, halo), cellH * 0.20f) { LineJoin = LineJoin.Round })
-                                using (var p2 = new Pen(Color.FromArgb(lv == HeadLevel ? 110 : 80, halo), cellH * 0.10f) { LineJoin = LineJoin.Round })
+                                using (var p1 = new Pen(Color.FromArgb(lv == HeadLevel ? 55 : 38, halo), sh * 0.20f) { LineJoin = LineJoin.Round })
+                                using (var p2 = new Pen(Color.FromArgb(lv == HeadLevel ? 110 : 80, halo), sh * 0.10f) { LineJoin = LineJoin.Round })
                                 {
                                     g.DrawPath(p1, path);
                                     g.DrawPath(p2, path);
                                 }
                             }
-                            // slight outline in the same colour makes the strokes a little heavier, like the film
-                            using (var p3 = new Pen(c, Math.Max(1f, cellH * 0.04f)) { LineJoin = LineJoin.Round })
+                            using (var p3 = new Pen(c, Math.Max(1f, sh * 0.04f)) { LineJoin = LineJoin.Round })
                                 g.DrawPath(p3, path);
                             g.FillPath(fill, path);
                         }
-                        atlas[lv][gi] = bmp;
+
+                        var tile = new Bitmap(cellW, cellH, PixelFormat.Format32bppPArgb);
+                        using (var g = Graphics.FromImage(tile))
+                        {
+                            g.Clear(Color.Black);
+                            g.InterpolationMode = k < 1f ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBicubic;
+                            g.PixelOffsetMode = PixelOffsetMode.Half;
+                            g.DrawImage(small, new Rectangle(0, 0, cellW, cellH), 0, 0, sw, sh, GraphicsUnit.Pixel);
+                            if (cfg.Retro)
+                            {
+                                // scanlines: every third pixel row is darkened (cell height is a multiple of 3)
+                                g.CompositingMode = CompositingMode.SourceOver;
+                                for (int yy = 2; yy < cellH; yy += 3)
+                                    g.FillRectangle(darken, 0, yy, cellW, 1);
+                            }
+                        }
+                        small.Dispose();
+                        atlas[lv][gi] = tile;
                     }
                 }
             }
@@ -359,82 +402,101 @@ namespace MatrixRain
             glyphGrid = new int[cols * rows];
             bright = new float[cols * rows];
             for (int i = 0; i < glyphGrid.Length; i++) glyphGrid[i] = RandGlyph();
-            headY = new float[cols];
-            speed = new float[cols];
-            trailLen = new int[cols];
-            active = new bool[cols];
-            respawnWait = new int[cols];
+            colDecay = new float[cols];
+            colTrail = new int[cols];
+            int n = cols * lanes;
+            headY = new float[n];
+            speed = new float[n];
+            active = new bool[n];
+            respawnWait = new int[n];
             introDone = new bool[cols];
             introLeft = cols;
             for (int c = 0; c < cols; c++)
             {
-                Respawn(c, true);
-                if (desk != null)
+                colTrail[c] = 14 + rng.Next(rows > 40 ? 40 : 24);
+                colDecay[c] = 1f / colTrail[c];
+                for (int l = 0; l < lanes; l++)
                 {
-                    // each column starts at its own moment (up to ~3 s) above the screen
-                    headY[c] = -speed[c] * rng.Next(0, 90) - 1;
+                    int d = c * lanes + l;
+                    speed[d] = NewSpeed();
+                    if (l == 0 && desk != null)
+                    {
+                        // stream 0 does the desktop-to-rain reveal; each column starts at its own moment (up to ~3 s)
+                        headY[d] = -speed[d] * rng.Next(0, 90) - 1;
+                        active[d] = true;
+                    }
+                    else if (desk != null)
+                    {
+                        headY[d] = -1;
+                        active[d] = false;
+                        respawnWait[d] = 60 + rng.Next(0, 120);
+                    }
+                    else
+                    {
+                        headY[d] = -rng.Next(rows * 2);
+                        active[d] = true;
+                    }
                 }
-                else
-                {
-                    headY[c] = -rng.Next(rows * 2);
-                    introDone[c] = true;
-                    introLeft--;
-                }
-                active[c] = true;
+                if (desk == null) { introDone[c] = true; introLeft--; }
             }
         }
 
-        void Respawn(int c, bool initial)
-        {
-            speed[c] = (0.30f + (float)rng.NextDouble() * 0.60f) * speedMul;   // rows per frame
-            trailLen[c] = 12 + rng.Next(rows > 40 ? 40 : 24);
-            if (initial)
-            {
-                headY[c] = -rng.Next(rows * 2);
-                active[c] = true;
-            }
-            else
-            {
-                headY[c] = -rng.Next(4);
-                respawnWait[c] = rng.Next(0, 45);
-                active[c] = false;
-            }
-        }
+        float NewSpeed() { return (0.30f + (float)rng.NextDouble() * 0.60f) * speedMul; }
 
         void Step()
         {
+            // fade
             for (int c = 0; c < cols; c++)
             {
-                float decay = 1f / Math.Max(6, trailLen[c]);
+                float decay = colDecay[c] * 0.7f;
                 for (int r = 0; r < rows; r++)
                 {
                     int i = r * cols + c;
-                    if (bright[i] > 0f) { bright[i] -= decay * speed[c] * 2.0f; if (bright[i] < 0f) bright[i] = 0f; }
+                    if (bright[i] > 0f) { bright[i] -= decay; if (bright[i] < 0f) bright[i] = 0f; }
                 }
             }
+            // advance every stream
             for (int c = 0; c < cols; c++)
             {
-                if (!active[c])
+                for (int l = 0; l < lanes; l++)
                 {
-                    if (--respawnWait[c] <= 0) active[c] = true;
-                    continue;
-                }
-                int prev = (int)Math.Floor(headY[c]);
-                headY[c] += speed[c];
-                int cur = (int)Math.Floor(headY[c]);
-                for (int r = prev + 1; r <= cur; r++)
-                {
-                    if (r >= 0 && r < rows)
+                    int d = c * lanes + l;
+                    if (!active[d])
                     {
-                        int i = r * cols + c;
-                        bright[i] = 1.5f; // >1 marks "head"
-                        glyphGrid[i] = RandGlyph();
+                        if (--respawnWait[d] <= 0) active[d] = true;
+                        continue;
+                    }
+                    int prev = (int)Math.Floor(headY[d]);
+                    headY[d] += speed[d];
+                    int cur = (int)Math.Floor(headY[d]);
+                    for (int r = prev + 1; r <= cur; r++)
+                    {
+                        if (r >= 0 && r < rows)
+                        {
+                            int i = r * cols + c;
+                            bright[i] = 1.5f; // >1 marks "head"
+                            glyphGrid[i] = RandGlyph();
+                        }
+                    }
+                    bool introLane = (l == 0 && !introDone[c]);
+                    if (!introLane && cur > rows + colTrail[c])
+                    {
+                        // stream has left the screen: start another soon (small gap = heavier rain)
+                        speed[d] = NewSpeed();
+                        headY[d] = -rng.Next(4);
+                        respawnWait[d] = rng.Next(0, 12 + 8 * (3 - lanes));
+                        active[d] = false;
+                        if (rng.Next(6) == 0)
+                        {
+                            colTrail[c] = 14 + rng.Next(rows > 40 ? 40 : 24);
+                            colDecay[c] = 1f / colTrail[c];
+                        }
                     }
                 }
-                if (cur - trailLen[c] * 2 > rows && introDone[c]) Respawn(c, false);
             }
+            // flicker inside trails
             int flickers = cols * rows / 300;
-            for (int k = 0; k < flickers; k++)
+            for (int q = 0; q < flickers; q++)
             {
                 int i = rng.Next(glyphGrid.Length);
                 if (bright[i] > 0f) glyphGrid[i] = RandGlyph();
@@ -456,7 +518,7 @@ namespace MatrixRain
                     int edge = rows; // rows [0, edge) show rain, the rest still show the desktop
                     if (!introDone[c])
                     {
-                        edge = Math.Max(0, Math.Min(rows, (int)Math.Floor(headY[c]) + 1));
+                        edge = Math.Max(0, Math.Min(rows, (int)Math.Floor(headY[c * lanes]) + 1));
                         if (edge >= rows)
                         {
                             introDone[c] = true;
